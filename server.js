@@ -1,7 +1,7 @@
 'use strict';
 
-// Self-spawning V8 Max Heap Limit Enforcer (Forced 460MB ceiling on Render/Cloud)
-if (!process.env._HEAP_SET) {
+// Self-spawning V8 Max Heap Limit Enforcer (Only on traditional Node servers, bypassed on Vercel)
+if (!process.env.VERCEL && !process.env._HEAP_SET) {
   const { spawnSync } = require('child_process');
   process.env._HEAP_SET = '1';
   const result = spawnSync(process.execPath, 
