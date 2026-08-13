@@ -4,7 +4,7 @@
   "description": "PII redaction tool for docx documents (Scaler AI Labs assignment)",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node --max-old-space-size=460 server.js",
     "redact": "node redact_document.js",
     "test": "node test/evaluate.js"
   },

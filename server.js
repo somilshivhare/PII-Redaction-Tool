@@ -28,7 +28,10 @@ app.post('/redact', upload.single('file'), (req, res) => {
   }
 
   try {
-    const { redactedBuffer, entities } = redactDocxBuffer(req.file.buffer);
+    const inputBuf = req.file.buffer;
+    req.file.buffer = null; // Release request buffer immediately for garbage collection
+
+    const { redactedBuffer, entities } = redactDocxBuffer(inputBuf);
 
     const summary = {};
     for (const e of entities) summary[e.type] = (summary[e.type] || 0) + 1;
