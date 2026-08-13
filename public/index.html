@@ -83,6 +83,12 @@
     background-color: var(--accent-light);
   }
 
+  .drop-zone.disabled {
+    pointer-events: none;
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
   .drop-icon {
     width: 2.5rem;
     height: 2.5rem;
@@ -109,14 +115,14 @@
     padding: 1rem 1.25rem;
     border-radius: 0.5rem;
     font-size: 0.875rem;
-    display: none;
+    display: none; /* Hidden by default */
   }
 
   .status-card.info {
     background-color: var(--accent-light);
     border: 1px solid var(--border);
     color: var(--text-primary);
-    display: flex;
+    display: none; /* Controlled by JS */
     align-items: center;
     gap: 0.75rem;
   }
@@ -189,15 +195,15 @@
     <svg class="drop-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
     </svg>
-    <div class="drop-title">Choose a .docx file or drag here</div>
-    <div class="drop-subtitle">Microsoft Word (.docx) documents supported</div>
+    <div class="drop-title" id="dropTitle">Choose a .docx file or drag here</div>
+    <div class="drop-subtitle" id="dropSubtitle">Microsoft Word (.docx) documents supported</div>
   </div>
 
   <input type="file" id="fileInput" accept=".docx">
 
   <div id="statusInfo" class="status-card info">
     <div class="spinner"></div>
-    <span>Processing document in RAM memory...</span>
+    <span id="infoText">Uploading and redacting document in memory...</span>
   </div>
 
   <div id="statusSuccess" class="status-card success">
@@ -215,11 +221,16 @@
 <script>
 const drop = document.getElementById('drop');
 const fileInput = document.getElementById('fileInput');
+const dropTitle = document.getElementById('dropTitle');
+const dropSubtitle = document.getElementById('dropSubtitle');
 const statusInfo = document.getElementById('statusInfo');
 const statusSuccess = document.getElementById('statusSuccess');
 const statusError = document.getElementById('statusError');
 const successMessage = document.getElementById('successMessage');
+const infoText = document.getElementById('infoText');
 const badgeGrid = document.getElementById('badgeGrid');
+
+let isProcessing = false;
 
 function hideAllStatus() {
   statusInfo.style.display = 'none';
@@ -227,27 +238,55 @@ function hideAllStatus() {
   statusError.style.display = 'none';
 }
 
-drop.addEventListener('click', () => fileInput.click());
-drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('hover'); });
-drop.addEventListener('dragleave', () => drop.classList.remove('hover'));
+function setProcessingState(processing, fileName = '') {
+  isProcessing = processing;
+  if (processing) {
+    drop.classList.add('disabled');
+    dropTitle.textContent = `Processing "${fileName}"...`;
+    dropSubtitle.textContent = 'Please wait while PII is being redacted in RAM';
+  } else {
+    drop.classList.remove('disabled');
+    dropTitle.textContent = 'Choose a .docx file or drag here';
+    dropSubtitle.textContent = 'Microsoft Word (.docx) documents supported';
+  }
+}
+
+drop.addEventListener('click', () => {
+  if (!isProcessing) fileInput.click();
+});
+
+drop.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  if (!isProcessing) drop.classList.add('hover');
+});
+
+drop.addEventListener('dragleave', () => {
+  if (!isProcessing) drop.classList.remove('hover');
+});
+
 drop.addEventListener('drop', (e) => {
   e.preventDefault();
+  if (isProcessing) return;
   drop.classList.remove('hover');
   if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
 });
+
 fileInput.addEventListener('change', () => {
+  if (isProcessing) return;
   if (fileInput.files.length) handleFile(fileInput.files[0]);
 });
 
 async function handleFile(file) {
   if (!file.name.endsWith('.docx')) {
     hideAllStatus();
-    statusError.textContent = 'Error: Please upload a valid .docx file.';
+    statusError.textContent = 'Error: Please upload a valid Microsoft Word (.docx) document.';
     statusError.style.display = 'block';
     return;
   }
 
   hideAllStatus();
+  setProcessingState(true, file.name);
+  infoText.textContent = `Redacting PII entities in "${file.name}"...`;
   statusInfo.style.display = 'flex';
 
   const formData = new FormData();
@@ -259,8 +298,10 @@ async function handleFile(file) {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      statusError.textContent = 'Error: ' + (err.error || res.statusText);
+      const msg = err.error || (res.status === 502 || res.status === 504 ? 'Server memory exceeded or timed out. Try Vercel deployment.' : res.statusText);
+      statusError.textContent = 'Error: ' + msg;
       statusError.style.display = 'block';
+      setProcessingState(false);
       return;
     }
 
@@ -283,18 +324,24 @@ async function handleFile(file) {
         b.textContent = `${type}: ${count}`;
         badgeGrid.appendChild(b);
       }
-      successMessage.textContent = `Done — Redacted ${totalSpans} PII spans! File downloaded.`;
+      successMessage.textContent = `Done — Redacted ${totalSpans} PII spans in "${file.name}"! File downloaded.`;
     } else {
-      successMessage.textContent = 'Done — Redacted file downloaded successfully.';
+      successMessage.textContent = `Done — Redacted "${file.name}" successfully! File downloaded.`;
     }
     statusSuccess.style.display = 'block';
 
   } catch (e) {
     hideAllStatus();
-    statusError.textContent = 'Error: ' + e.message;
+    statusError.textContent = 'Error: Connection failed or server restarted due to memory limit.';
     statusError.style.display = 'block';
+  } finally {
+    setProcessingState(false);
+    fileInput.value = ''; // Reset input selection
   }
 }
+
+// Initial State: Hide all status elements on page load
+hideAllStatus();
 </script>
 </body>
 </html>
