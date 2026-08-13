@@ -150,7 +150,7 @@ const DETECTORS = [
   },
   {
     type: 'ADDRESS',
-    regex: /([A-Za-z0-9,/.\-\s]{10,80}?[–-]?\s*\d{3}\s?\d{3})(?=\s*,?\s*(?:Maharashtra|India|[A-Z][a-z]+,\s*India))|\b[A-Za-z0-9,/.\-\s]{10,80}?\b(?:Village|Tower|Business Centre|Building|Farms|Taluka|District|Off|Plot|Gat No|Industrial Area|Phase|Complex|Society|Nagar|Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Suite|Floor)\b[A-Za-z0-9,/.\-\s]{0,50}?\b\d{5,6}\b/gi,
+    regex: /([A-Za-z0-9,/.\-\s]{10,90}?[–-]?\s*\d{3}\s?\d{3})(?=\s*,?\s*(?:Maharashtra|India|[A-Z][a-z]+,\s*India))|\b[A-Za-z0-9,/.\-\s]{5,90}?\b(?:Village|Tower|Business Centre|Building|Farms|Taluka|District|Off|Plot|Gat No|Industrial Area|Phase|Complex|Society|Nagar|Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Suite|Floor|Birdewadi|Chakan|Baner|Pashan|Khed)\b[A-Za-z0-9,/.\-\s]{0,60}?(?=\s*,|\s*\.|\n|$)/gi,
     fake: (m, f) => f.get('ADDRESS', m[1] || m[0], fakeAddress),
   },
 ];
