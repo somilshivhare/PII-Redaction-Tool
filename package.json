@@ -1,0 +1,20 @@
+{
+  "name": "pii-redaction-tool",
+  "version": "1.0.0",
+  "description": "PII redaction tool for docx documents (Scaler AI Labs assignment)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "redact": "node redact_document.js",
+    "test": "node test/evaluate.js"
+  },
+  "dependencies": {
+    "@xmldom/xmldom": "^0.9.11",
+    "compromise": "^14.16.0",
+    "docx": "^8.5.0",
+    "express": "^4.19.2",
+    "multer": "^1.4.5-lts.1",
+    "nodemon": "^3.1.14",
+    "pizzip": "^3.2.0"
+  }
+}

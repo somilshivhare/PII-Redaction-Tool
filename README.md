@@ -1,49 +1,90 @@
-# PII Redaction Tool
+# 🛡️ PII Redaction Tool
 
-## Approach
+A high-performance, stateless PII (Personally Identifiable Information) Redaction Engine built in pure Node.js and Express. It parses Microsoft Word (`.docx`) files **entirely in RAM memory** and replaces sensitive entities across 9 categories with format-consistent fake data while preserving 100% of document formatting, table layouts, fonts, and images.
 
-**Pure JavaScript, Ephemeral In-Memory Architecture**:
-Processes `.docx` files **entirely in RAM memory (Buffers)** by directly parsing `word/document.xml` using `pizzip` and `@xmldom/xmldom`. 
+---
 
-- **100% Formatting Preserved**: Unlike text-extraction tools that strip document styling, this tool edits text runs in-place inside `word/document.xml`, preserving original fonts, headings, tables, borders, and margins.
-- **Zero Disk/Cloud Storage**: Files are held transiently in RAM (`Buffer`) during HTTP request execution and never written to server disk or external cloud storage ("Privacy by Design").
-- **Zero CLI Dependencies**: Fully self-contained pure JavaScript — no external CLI binaries (`pandoc`) or python setups required.
+## ✨ Key Features & Architecture
 
-**Pipeline** (`redact_document.js` / `server.js`):
-1. `input.docx` Buffer → parsed directly into XML DOM via `pizzip` + `@xmldom/xmldom`
-2. Paragraph XML text → redacted text + entity list via `src/redactor.js`
-3. Updated XML DOM → serialized back into `.docx` Buffer
+* 📄 **100% Formatting Preservation**: Edits text runs directly in-place inside `word/document.xml` using `PizZip` and `@xmldom/xmldom`. Original fonts, headings, tables, borders, and margins remain completely untouched.
+* ⚡ **Ephemeral In-Memory Processing**: Holds uploaded files as byte buffers in RAM (`multer.memoryStorage()`) with **Zero Disk/Cloud Data Retention** ("Privacy by Design").
+* 🧠 **Open-Vocabulary Name NER**: Integrates `compromise` NLP and context-anchored role/designation rules to detect person names dynamically across any company's document without fragile hardcoding.
+* 💳 **Mathematical Luhn Validation**: Uses the Luhn algorithm for credit card validation, preventing false positives on order IDs, ticket numbers, or invoice IDs.
+* 🔄 **2-Pass Idempotent Value Propagation**: Detects entities by pattern in Pass 1, then propagates caught values across all paragraphs/sections in Pass 2 for consistent mapping and zero leaks.
+* 📱 **Mobile-Responsive Web UI**: Modern dark-mode interface supporting drag-and-drop uploads, processing spinners, and real-time category badge counts.
 
-**Avoiding double-redaction:** detectors run in order of specificity
-(credit card → SSN → IP → email → phone → DOB → titled name → ALL-CAPS name →
-company → address). Each match is swapped out immediately, so looser
-downstream detectors can never re-match text a stricter detector already redacted.
+---
 
-**Consistency:** the same original value always maps to the same fake value
-throughout the document (a `Map` inside `FakeFactory`), matching the
-assignment's example (`Rashi Patil` → always `John Doe`, never a different
-fake name each time).
+## 🔍 Supported PII Categories & Detectors
 
-## Detectors
+| Category | Detection Strategy |
+| :--- | :--- |
+| **CREDIT_CARD** | 13–19 digit sequence + **Luhn Checksum Algorithm** validation |
+| **SSN** | Universal `XXX-XX-XXXX` pattern |
+| **IP_ADDRESS** | Standard IPv4 dotted-quad regex |
+| **EMAIL** | Standard RFC-compliant email regex |
+| **PHONE** | International `+CC` and national format regexes |
+| **DOB** | Context-gated date patterns (`Date of Birth`, `DOB`, `Born on`) |
+| **FULL_NAME** | `compromise` NLP + Title prefixes (`Mr.`, `Dr.`) + Designation anchors (`Director`, `Manager`, `CFO`, `CS`, `Promoter`) + ALL-CAPS listings |
+| **COMPANY_NAME** | Title-Case and ALL-CAPS phrases ending in legal suffixes (`Limited`, `LLP`, `Pvt Ltd`, `Inc`, `Corp`) |
+| **ADDRESS** | Location/street anchors (`Village`, `Tower`, `Building`, `Road`, `Avenue`) + Postal PIN/ZIP code patterns + Pass 2 propagation |
 
-| Type | Method |
-|---|---|
-| Credit card | 13–19 digit sequence + **Luhn checksum** validation (avoids flagging random long numbers) |
-| SSN | `XXX-XX-XXXX` |
-| IP address | IPv4 dotted-quad |
-| Email | standard email regex |
-| Phone | `+CC ...` international-format numbers |
-| Date of birth | date pattern **only** when preceded by "Date of Birth"/"DOB" |
-| Full name | (a) "Mr./Mrs./Ms./Dr./Shri/Smt. Firstname Lastname", or (b) 2–4 consecutive ALL-CAPS words, filtered against an English function-word list + domain boilerplate stoplist |
-| Company name | Title-Case phrase ending in a legal suffix (Limited, LLP, Pvt Ltd, Inc, Corp, ...) |
-| Address | text segment ending in a 6-digit Indian PIN code, immediately followed by "Maharashtra"/"India"/"City, India" |
+---
 
-## Running it
+## 🚀 Getting Started
 
+### Prerequisites
+* Node.js v18+ 
+* npm v9+
+
+### Installation
 ```bash
+git clone https://github.com/<your-username>/pii-redaction-tool.git
+cd pii-redaction-tool
 npm install
-npm start                      # Starts Express server on http://localhost:3000
-node redact_document.js <input.docx> <output.docx> [entities.json] # CLI tool
-node test/evaluate.js          # Precision/Recall/F1 evaluation suite
 ```
 
+### Running the Web Server
+```bash
+npm start
+```
+Open [http://localhost:3000](http://localhost:3000) in your browser to access the drag-and-drop Web UI.
+
+### Running the CLI Redactor
+```bash
+node redact_document.js <input.docx> <output.docx> [entities.json]
+```
+
+### Running the Benchmark Test Suite
+```bash
+node test/evaluate.js
+```
+
+---
+
+## 📡 API Reference
+
+### `POST /redact`
+Accepts a `.docx` file and returns the redacted `.docx` buffer along with entity counts in headers.
+
+* **Content-Type**: `multipart/form-data`
+* **Form Field**: `file` (`.docx` document)
+* **Response**: Binary `.docx` stream
+* **Response Header**: `X-Entity-Summary` (JSON object of redacted entity counts)
+
+---
+
+## 🐳 Docker Deployment
+
+```bash
+# Build Docker image
+docker build -t pii-redactor .
+
+# Run Docker container
+docker run -p 3000:3000 pii-redactor
+```
+
+---
+
+## 📄 License
+Licensed under the [MIT License](LICENSE).
