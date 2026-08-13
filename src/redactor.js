@@ -6,7 +6,6 @@
  * - Open-vocabulary Name NER via compromise NLP + Titles & Roles
  * - Mathematical Luhn algorithm validation for credit cards
  * - Universal pattern regexes for Email, Phone, SSN, IP, DOB, Company, Address
- * - Non-PII legal & document title exclusion list (RHP, Companies Act, SEBI Act, Depository Participant, etc.)
  * - Chunked Paragraph NLP Execution (Low RAM footprint < 15MB)
  * - 2-Pass Idempotent Value Propagation across the document
  */
@@ -19,31 +18,6 @@ const FAKE_COMPANY_STEMS = ['Acme', 'Globex', 'Initech', 'Umbrella', 'Stark', 'W
 const FAKE_COMPANY_SUFFIXES = ['Limited', 'Private Limited', 'Industries Limited', 'Corp', 'Inc.', 'LLP'];
 const FAKE_STREETS = ['123 Maple Street', '45 Oak Avenue', '78 Pine Road', '12 Elm Boulevard', '99 Cedar Lane'];
 const FAKE_CITIES = ['Springfield', 'Rivertown', 'Fairview', 'Lakeside', 'Millbrook'];
-
-const NON_PII_EXCLUSIONS = new Set([
-  'RED HERRING PROSPECTUS',
-  'RED HERRING',
-  'PROSPECTUS',
-  'RHP',
-  'COMPANIES ACT',
-  'SEBI ACT',
-  'SEBI ICDR REGULATIONS',
-  'SEBI ICDR',
-  'BOOK BUILT',
-  'BOOK BUILDING',
-  'EQUITY SHARE',
-  'EQUITY SHARES',
-  'DRAFT RED HERRING PROSPECTUS',
-  'DRHP',
-  'ACT',
-  'DEPOSITORY PARTICIPANT',
-  'DEPOSITORY',
-  'PARTICIPANT',
-  'PROMOTER SELLING SHAREHOLDERS',
-  'PROMOTER SELLING SHAREHOLDER',
-  'PROMOTER GROUP',
-  'PROMOTERS'
-]);
 
 class FakeFactory {
   constructor() {
@@ -156,9 +130,7 @@ const DETECTORS = [
     type: 'FULL_NAME',
     regex: /\b([A-Z][A-Z]{2,}(?:\s+[A-Z][A-Z]{2,}){1,3})\b/g,
     filter: (m) => {
-      const valUpper = m[1].trim().toUpperCase();
-      if (NON_PII_EXCLUSIONS.has(valUpper)) return false;
-      const words = valUpper.split(/\s+/);
+      const words = m[1].split(/\s+/);
       const stop = new Set(['THE','AND','FOR','OUR','WITH','FROM','THIS','THAT','THESE','THOSE','OFFICE','REGISTERED','CORPORATE','PROSPECTUS','RED','HERRING','OFFER','ISSUE','SHARE','SHARES','EQUITY','BOARD','DIRECTORS','BANK','SECURITIES','CAPITAL','MARKET','EXCHANGE','ACT','SEBI','DETAILS','DATE','WEBSITE','TELEPHONE','EMAIL','CONTACT','PERSON','INFORMATION']);
       if (words.some(w => stop.has(w))) return false;
       return words.length >= 2 && words.length <= 4;
@@ -167,7 +139,7 @@ const DETECTORS = [
   },
   {
     type: 'FULL_NAME',
-    regex: /\b(?:Director|Manager|Officer|President|CEO|CFO|CTO|Engineer|Consultant|Secretary|Representative|Signatory|Promoter|Auditor|Shareholder|Partner|Contact Person)\s*[:\-–,]?\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b|\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\s*[:\-–,]?\s+(?:Director|Manager|Officer|President|CEO|CFO|CTO|Engineer|Consultant|Secretary|Representative|Signatory|Promoter|Auditor|Shareholder|Partner|Contact Person)\b/g,
+    regex: /\b(?:Director|Manager|Officer|President|CEO|CFO|CTO|Engineer|Consultant|Secretary|Representative|Signatory|Promoter|Auditor|Shareholder|Partner|Contact Person)\s*[:\-–,]?\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b|\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\s*,\s*(?:Director|Manager|Officer|President|CEO|CFO|CTO|Engineer|Consultant|Secretary|Representative|Signatory|Promoter|Auditor|Shareholder|Partner|Contact Person)\b/g,
     fake: (m, f) => f.get('FULL_NAME', m[1] || m[2], (i) => fakeName(i, false)),
   },
   {
@@ -188,12 +160,12 @@ function redact(text, sharedFactory) {
   const entities = [];
   let working = text;
 
+  // Pass 0: Delimited List Token Splitter
   if (/[\/;]/.test(working)) {
     const segments = working.split(/[\/;]/);
     for (let seg of segments) {
       seg = seg.trim();
       if (/^[A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?$/.test(seg)) {
-        if (NON_PII_EXCLUSIONS.has(seg.toUpperCase())) continue;
         const fakeVal = factory.get('FULL_NAME', seg, (i) => fakeName(i, false));
         const escaped = seg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const regex = new RegExp(`\\b${escaped}\\b`, 'g');
@@ -207,6 +179,7 @@ function redact(text, sharedFactory) {
     }
   }
 
+  // Pass 1: Universal Pattern Detectors
   for (const det of DETECTORS) {
     det.regex.lastIndex = 0;
     let out = '', last = 0, m;
@@ -215,7 +188,6 @@ function redact(text, sharedFactory) {
       const grp = det.captureGroup || 0;
       const original = m[grp];
       if (!original) continue;
-      if (NON_PII_EXCLUSIONS.has(original.trim().toUpperCase())) continue;
 
       const grpStart = grp === 0 ? m.index : working.indexOf(original, m.index);
       const grpEnd = grpStart + original.length;
@@ -229,6 +201,7 @@ function redact(text, sharedFactory) {
     working = out;
   }
 
+  // Pass 1.5: Low Memory Chunked NLP Person Detection via compromise
   try {
     const paragraphs = working.split('\n');
     let nlpOutput = '';
@@ -239,7 +212,6 @@ function redact(text, sharedFactory) {
         for (let person of people) {
           person = person.trim();
           if (person && person.length > 3 && !/^(THE|AND|FOR|OUR|WITH|FROM|MR|MRS|MS|DR)$/i.test(person)) {
-            if (NON_PII_EXCLUSIONS.has(person.toUpperCase())) continue;
             if (FAKE_FIRST_NAMES.concat(FAKE_LAST_NAMES).some(f => new RegExp(`\\b${f}\\b`, 'i').test(person))) continue;
             const fakeVal = factory.get('FULL_NAME', person, (i) => fakeName(i, person === person.toUpperCase()));
             const escaped = person.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -260,28 +232,16 @@ function redact(text, sharedFactory) {
     // compromise NLP fallback safety
   }
 
+  // Pass 2: Idempotent Propagation for any caught PII values
   const caught = [];
   for (const [type, map] of factory.maps.entries()) {
     for (const [origKey, fakeVal] of map.entries()) {
-      if (origKey.length >= 4 && !NON_PII_EXCLUSIONS.has(origKey.toUpperCase())) {
-        caught.push({ type, origKey, fakeVal });
-        if (type === 'FULL_NAME' || type === 'ADDRESS') {
-          const tokens = origKey.split(/[\s,]+/);
-          for (const token of tokens) {
-            const cleanToken = token.trim();
-            if (cleanToken.length >= 4 && !NON_PII_EXCLUSIONS.has(cleanToken.toUpperCase()) && !/^(LIMITED|PRIVATE|TRUST|GROUP|CORPORATION|DIRECTOR|MANAGER|SECRETARY|OFFICER|OFFICE|CORPORATE|REGISTERED|DEPOSITORY|PARTICIPANT|PROMOTERS|PROMOTER|SHAREHOLDERS|SHAREHOLDER)$/i.test(cleanToken)) {
-              const fakeToken = fakeVal.split(/[\s,]+/)[0] || fakeVal;
-              caught.push({ type, origKey: cleanToken, fakeVal: fakeToken });
-            }
-          }
-        }
-      }
+      if (origKey.length >= 4) caught.push({ type, origKey, fakeVal });
     }
   }
   caught.sort((a, b) => b.origKey.length - a.origKey.length);
 
   for (const item of caught) {
-    if (NON_PII_EXCLUSIONS.has(item.origKey.toUpperCase())) continue;
     const escaped = item.origKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = new RegExp(`\\b${escaped}\\b`, 'gi');
     if (regex.test(working)) {
@@ -292,9 +252,7 @@ function redact(text, sharedFactory) {
     }
   }
 
-  working = working.replace(/([a-zA-Z])(\d{2,}\s+[A-Za-z])/g, '$1 $2');
-
-  return { redactText: working, entities };
+  return { redactedText: working, entities };
 }
 
 module.exports = { redact, luhnValid, FakeFactory };
