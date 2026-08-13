@@ -139,7 +139,7 @@ const DETECTORS = [
   },
   {
     type: 'FULL_NAME',
-    regex: /\b(?:Director|Manager|Officer|President|CEO|CFO|CTO|Engineer|Consultant|Secretary|Representative|Signatory|Promoter|Auditor|Shareholder|Partner|Contact Person)\s*[:\-–,]?\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b|\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\s*,\s*(?:Director|Manager|Officer|President|CEO|CFO|CTO|Engineer|Consultant|Secretary|Representative|Signatory|Promoter|Auditor|Shareholder|Partner|Contact Person)\b/g,
+    regex: /\b(?:Director|Manager|Officer|President|CEO|CFO|CTO|Engineer|Consultant|Secretary|Representative|Signatory|Promoter|Auditor|Shareholder|Partner|Contact Person)\s*[:\-–,]?\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b|\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\s*[:\-–,]?\s+(?:Director|Manager|Officer|President|CEO|CFO|CTO|Engineer|Consultant|Secretary|Representative|Signatory|Promoter|Auditor|Shareholder|Partner|Contact Person)\b/g,
     fake: (m, f) => f.get('FULL_NAME', m[1] || m[2], (i) => fakeName(i, false)),
   },
   {
@@ -160,7 +160,6 @@ function redact(text, sharedFactory) {
   const entities = [];
   let working = text;
 
-  // Pass 0: Delimited List Token Splitter
   if (/[\/;]/.test(working)) {
     const segments = working.split(/[\/;]/);
     for (let seg of segments) {
@@ -179,7 +178,6 @@ function redact(text, sharedFactory) {
     }
   }
 
-  // Pass 1: Universal Pattern Detectors
   for (const det of DETECTORS) {
     det.regex.lastIndex = 0;
     let out = '', last = 0, m;
@@ -201,7 +199,6 @@ function redact(text, sharedFactory) {
     working = out;
   }
 
-  // Pass 1.5: Low Memory Chunked NLP Person Detection via compromise
   try {
     const paragraphs = working.split('\n');
     let nlpOutput = '';
@@ -232,11 +229,23 @@ function redact(text, sharedFactory) {
     // compromise NLP fallback safety
   }
 
-  // Pass 2: Idempotent Propagation for any caught PII values
   const caught = [];
   for (const [type, map] of factory.maps.entries()) {
     for (const [origKey, fakeVal] of map.entries()) {
-      if (origKey.length >= 4) caught.push({ type, origKey, fakeVal });
+      if (origKey.length >= 4) {
+        caught.push({ type, origKey, fakeVal });
+        // Sub-word propagation for multi-token full names and addresses
+        if (type === 'FULL_NAME' || type === 'ADDRESS') {
+          const tokens = origKey.split(/[\s,]+/);
+          for (const token of tokens) {
+            const cleanToken = token.trim();
+            if (cleanToken.length >= 4 && !/^(LIMITED|PRIVATE|TRUST|GROUP|CORPORATION|DIRECTOR|MANAGER|SECRETARY|OFFICER|OFFICE|CORPORATE|REGISTERED)$/i.test(cleanToken)) {
+              const fakeToken = fakeVal.split(/[\s,]+/)[0] || fakeVal;
+              caught.push({ type, origKey: cleanToken, fakeVal: fakeToken });
+            }
+          }
+        }
+      }
     }
   }
   caught.sort((a, b) => b.origKey.length - a.origKey.length);
@@ -251,6 +260,9 @@ function redact(text, sharedFactory) {
       });
     }
   }
+
+  // Prevent adjacent fake address / text values from running into each other without space separators
+  working = working.replace(/([a-zA-Z])(\d{2,}\s+[A-Za-z])/g, '$1 $2');
 
   return { redactedText: working, entities };
 }

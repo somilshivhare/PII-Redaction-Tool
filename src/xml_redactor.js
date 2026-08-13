@@ -6,6 +6,7 @@ const { redact } = require('./redactor');
 
 /**
  * Redacts PII in a Word document buffer (.docx) in-place without losing document formatting.
+ * Processes both Table Cells (<w:tc>) and Top-Level Paragraphs (<w:p>) to handle wrapped cell text.
  *
  * @param {Buffer} docxBuffer - Input .docx file buffer
  * @returns {{ redactedBuffer: Buffer, entities: Array }}
@@ -29,16 +30,58 @@ function redactDocxBuffer(docxBuffer) {
     if (!xmlRaw) continue;
 
     const doc = domParser.parseFromString(xmlRaw, 'text/xml');
-    const paragraphs = doc.getElementsByTagName('w:p');
-
     let fileModified = false;
 
+    // Pass A: Table Cell Level (<w:tc>) Concatenated Text Processing
+    const tableCells = doc.getElementsByTagName('w:tc');
+    for (let i = 0; i < tableCells.length; i++) {
+      const tc = tableCells[i];
+      const textNodes = tc.getElementsByTagName('w:t');
+      if (textNodes.length === 0) continue;
+
+      // Extract full concatenated cell text across all paragraphs and runs within the cell
+      let cellTextParts = [];
+      for (let j = 0; j < textNodes.length; j++) {
+        const txt = (textNodes[j].textContent || '').trim();
+        if (txt) cellTextParts.push(txt);
+      }
+
+      const fullCellText = cellTextParts.join(' ');
+      if (!fullCellText.trim()) continue;
+
+      const { redactedText, entities } = redact(fullCellText, factory);
+
+      if (entities.length > 0) {
+        allEntities.push(...entities);
+        fileModified = true;
+
+        // Place redacted text into the first <w:t> run in the cell and clear remaining runs
+        textNodes[0].textContent = redactedText;
+        if (textNodes[0].setAttribute) {
+          textNodes[0].setAttribute('xml:space', 'preserve');
+        }
+        for (let j = 1; j < textNodes.length; j++) {
+          textNodes[j].textContent = '';
+        }
+      }
+    }
+
+    // Pass B: Top-Level Paragraph Processing (<w:p>) for body text outside tables
+    const paragraphs = doc.getElementsByTagName('w:p');
     for (let i = 0; i < paragraphs.length; i++) {
       const p = paragraphs[i];
+      // Skip paragraphs inside tables (already processed in Pass A)
+      let parent = p.parentNode;
+      let insideCell = false;
+      while (parent) {
+        if (parent.nodeName === 'w:tc') { insideCell = true; break; }
+        parent = parent.parentNode;
+      }
+      if (insideCell) continue;
+
       const textNodes = p.getElementsByTagName('w:t');
       if (textNodes.length === 0) continue;
 
-      // Extract full paragraph text across all <w:t> runs
       let originalParagraphText = '';
       for (let j = 0; j < textNodes.length; j++) {
         originalParagraphText += textNodes[j].textContent || '';
@@ -46,14 +89,12 @@ function redactDocxBuffer(docxBuffer) {
 
       if (!originalParagraphText.trim()) continue;
 
-      // Run core PII redaction engine with shared factory across document
       const { redactedText, entities } = redact(originalParagraphText, factory);
 
       if (entities.length > 0 && redactedText !== originalParagraphText) {
         allEntities.push(...entities);
         fileModified = true;
 
-        // Place redacted text into the first <w:t> run and clear remaining runs
         textNodes[0].textContent = redactedText;
         if (textNodes[0].setAttribute) {
           textNodes[0].setAttribute('xml:space', 'preserve');
