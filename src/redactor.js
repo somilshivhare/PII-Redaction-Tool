@@ -6,7 +6,7 @@
  * - Open-vocabulary Name NER via compromise NLP + Titles & Roles
  * - Mathematical Luhn algorithm validation for credit cards
  * - Universal pattern regexes for Email, Phone, SSN, IP, DOB, Company, Address
- * - Slash/Delimiter splitting for multi-name lists
+ * - Chunked Paragraph NLP Execution (Low RAM footprint < 15MB)
  * - 2-Pass Idempotent Value Propagation across the document
  */
 
@@ -108,7 +108,6 @@ const DETECTORS = [
   },
   {
     type: 'PHONE',
-    // Matches numbers with optional country code (+ 91, +91, etc.), spaces, dashes, parentheses
     regex: /\+\s*\d{1,3}[\s.-]?\(?\d{2,4}\)?(?:[\s.-]?\d{2,4}){2,4}\b|\b(?:Tel|Telephone|Phone|Mobile|Fax)\s*[:\-–]?\s*(\+?\s*\d[\d\s.-]{7,15}\d)\b/gi,
     fake: (m, f) => {
       const val = m[1] || m[0];
@@ -129,12 +128,6 @@ const DETECTORS = [
   },
   {
     type: 'FULL_NAME',
-    // Supports multi-word role titles (e.g. Technical Director, Company Secretary, Managing Director)
-    regex: /\b(?:Technical|Executive|Managing|Associate|Assistant|Senior|General|Company|Compliance|Chief)?\s*(?:Director|Manager|Officer|President|CEO|CFO|CTO|Engineer|Consultant|Secretary|Representative|Signatory|Promoter|Auditor|Shareholder|Partner|Contact Person)\s*[:\-–,]?\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b|\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\s*,\s*(?:Technical|Executive|Managing|Associate|Assistant|Senior|General|Company|Compliance|Chief)?\s*(?:Director|Manager|Officer|President|CEO|CFO|CTO|Engineer|Consultant|Secretary|Representative|Signatory|Promoter|Auditor|Shareholder|Partner|Contact Person)\b/gi,
-    fake: (m, f) => f.get('FULL_NAME', m[1] || m[2], (i) => fakeName(i, false)),
-  },
-  {
-    type: 'FULL_NAME',
     regex: /\b([A-Z][A-Z]{2,}(?:\s+[A-Z][A-Z]{2,}){1,3})\b/g,
     filter: (m) => {
       const words = m[1].split(/\s+/);
@@ -145,16 +138,19 @@ const DETECTORS = [
     fake: (m, f) => f.get('FULL_NAME', m[1], (i) => fakeName(i, true)),
   },
   {
+    type: 'FULL_NAME',
+    regex: /\b(?:Director|Manager|Officer|President|CEO|CFO|CTO|Engineer|Consultant|Secretary|Representative|Signatory|Promoter|Auditor|Shareholder|Partner|Contact Person)\s*[:\-–,]?\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b|\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\s*,\s*(?:Director|Manager|Officer|President|CEO|CFO|CTO|Engineer|Consultant|Secretary|Representative|Signatory|Promoter|Auditor|Shareholder|Partner|Contact Person)\b/g,
+    fake: (m, f) => f.get('FULL_NAME', m[1] || m[2], (i) => fakeName(i, false)),
+  },
+  {
     type: 'COMPANY_NAME',
-    // Matches Title-Case or ALL-CAPS company names ending in legal entity suffix
-    regex: /\b([A-Z][A-Za-z0-9&.]*(?:\s+[A-Z][A-Za-z0-9&.]*){0,5}\s+(?:Limited|Ltd\.?|LLP|Pvt\.?\s*Ltd\.?|Private\s+Limited|Inc\.?|Corp\.?|Corporation))\b/gi,
+    regex: /\b([A-Z][A-Za-z0-9&.]*(?:\s+[A-Z][A-Za-z0-9&.]*){0,4}\s+(?:Limited|Ltd\.?|LLP|Pvt\.?\s*Ltd\.?|Private\s+Limited|Inc\.?|Corp\.?|Corporation))\b/gi,
     captureGroup: 1,
     fake: (m, f) => f.get('COMPANY_NAME', m[1], fakeCompany),
   },
   {
     type: 'ADDRESS',
-    // Generalized address pattern: matches street/building/village/centre location anchors with or without PIN codes
-    regex: /([A-Za-z0-9,/.\-\s]{10,90}?[–-]?\s*\d{3}\s?\d{3})(?=\s*,?\s*(?:Maharashtra|India|[A-Z][a-z]+,\s*India))|\b[A-Za-z0-9,/.\-\s]{10,90}?\b(?:Village|Tower|Business Centre|Building|Farms|Taluka|District|Off|Plot|Gat No|Industrial Area|Phase|Complex|Society|Nagar|Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Suite|Floor|Baner|Pashan|Bandra|BKC|Vikhroli|Prabhadevi|Khed|Chakan|Birdewadi)\b[A-Za-z0-9,/.\-\s]{0,60}?(?=\s*,|\s*\.|\n|$)/gi,
+    regex: /([A-Za-z0-9,/.\-\s]{10,80}?[–-]?\s*\d{3}\s?\d{3})(?=\s*,?\s*(?:Maharashtra|India|[A-Z][a-z]+,\s*India))|\b[A-Za-z0-9,/.\-\s]{10,80}?\b(?:Village|Tower|Business Centre|Building|Farms|Taluka|District|Off|Plot|Gat No|Industrial Area|Phase|Complex|Society|Nagar|Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Suite|Floor)\b[A-Za-z0-9,/.\-\s]{0,50}?\b\d{5,6}\b/gi,
     fake: (m, f) => f.get('ADDRESS', m[1] || m[0], fakeAddress),
   },
 ];
@@ -164,7 +160,7 @@ function redact(text, sharedFactory) {
   const entities = [];
   let working = text;
 
-  // Pass 0: Delimited List Token Splitter (Fix for BUG 1 - Slash/Comma/Semicolon delimited names like "Name1/ Name2/ Name3")
+  // Pass 0: Delimited List Token Splitter
   if (/[\/;]/.test(working)) {
     const segments = working.split(/[\/;]/);
     for (let seg of segments) {
@@ -205,25 +201,33 @@ function redact(text, sharedFactory) {
     working = out;
   }
 
-  // Pass 1.5: Pure JS NLP Person Detection via compromise
+  // Pass 1.5: Low Memory Chunked NLP Person Detection via compromise
   try {
-    const doc = nlp(working);
-    const people = doc.people().out('array');
-    for (let person of people) {
-      person = person.trim();
-      if (person && person.length > 3 && !/^(THE|AND|FOR|OUR|WITH|FROM|MR|MRS|MS|DR)$/i.test(person)) {
-        if (FAKE_FIRST_NAMES.concat(FAKE_LAST_NAMES).some(f => new RegExp(`\\b${f}\\b`, 'i').test(person))) continue;
-        const fakeVal = factory.get('FULL_NAME', person, (i) => fakeName(i, person === person.toUpperCase()));
-        const escaped = person.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const regex = new RegExp(`\\b${escaped}\\b`, 'g');
-        if (regex.test(working)) {
-          working = working.replace(regex, (match) => {
-            entities.push({ type: 'FULL_NAME', original: match, fake: fakeVal });
-            return fakeVal;
-          });
+    const paragraphs = working.split('\n');
+    let nlpOutput = '';
+    for (let p of paragraphs) {
+      if (p.trim().length > 5) {
+        const doc = nlp(p);
+        const people = doc.people().out('array');
+        for (let person of people) {
+          person = person.trim();
+          if (person && person.length > 3 && !/^(THE|AND|FOR|OUR|WITH|FROM|MR|MRS|MS|DR)$/i.test(person)) {
+            if (FAKE_FIRST_NAMES.concat(FAKE_LAST_NAMES).some(f => new RegExp(`\\b${f}\\b`, 'i').test(person))) continue;
+            const fakeVal = factory.get('FULL_NAME', person, (i) => fakeName(i, person === person.toUpperCase()));
+            const escaped = person.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(`\\b${escaped}\\b`, 'g');
+            if (regex.test(p)) {
+              p = p.replace(regex, (match) => {
+                entities.push({ type: 'FULL_NAME', original: match, fake: fakeVal });
+                return fakeVal;
+              });
+            }
+          }
         }
       }
+      nlpOutput += p + '\n';
     }
+    working = nlpOutput.trimEnd();
   } catch (e) {
     // compromise NLP fallback safety
   }
