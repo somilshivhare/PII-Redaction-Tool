@@ -44,14 +44,18 @@ app.post('/redact', upload.single('file'), (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-const server = app.listen(PORT, () => console.log(`PII redactor server listening on http://localhost:${PORT}`));
+if (require.main === module) {
+  const server = app.listen(PORT, () => console.log(`PII redactor server listening on http://localhost:${PORT}`));
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`\n[ERROR] Port ${PORT} is already in use.`);
+      console.error(`To free port ${PORT}, run:\n  npx kill-port ${PORT}\n  OR\n  lsof -ti :${PORT} | xargs kill -9\n`);
+      process.exit(1);
+    }
+  });
+}
 
-server.on('error', (err) => {
-  if (err.code === 'EADDRINUSE') {
-    console.error(`\n[ERROR] Port ${PORT} is already in use.`);
-    console.error(`To free port ${PORT}, run:\n  npx kill-port ${PORT}\n  OR\n  lsof -ti :${PORT} | xargs kill -9\n`);
-    process.exit(1);
-  }
-});
+module.exports = app;
+
 
 
