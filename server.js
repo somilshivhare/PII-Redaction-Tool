@@ -1,3 +1,15 @@
+'use strict';
+
+// Self-spawning V8 Max Heap Limit Enforcer (Forced 460MB ceiling on Render/Cloud)
+if (!process.env._HEAP_SET) {
+  const { spawnSync } = require('child_process');
+  process.env._HEAP_SET = '1';
+  const result = spawnSync(process.execPath, 
+    ['--max-old-space-size=460', __filename, ...process.argv.slice(2)], 
+    { stdio: 'inherit', env: process.env });
+  process.exit(result.status);
+}
+
 /**
  * Express Web Server for PII Redaction Tool.
  * POST /redact  (multipart form, field name "file") -> returns redacted .docx
@@ -7,7 +19,6 @@
  * Uploaded files are processed strictly in RAM (Buffer) via pure JS OpenXML parsing,
  * preserving 100% of original formatting without writing any files to disk or using external CLI tools.
  */
-'use strict';
 
 const express = require('express');
 const multer = require('multer');
@@ -59,6 +70,3 @@ if (require.main === module) {
 }
 
 module.exports = app;
-
-
-
